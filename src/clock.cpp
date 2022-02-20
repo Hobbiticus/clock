@@ -20,7 +20,7 @@ AccelStepper stepper(AccelStepper::FULL4WIRE, 32, 26, 25, 27);
 //14 teeth on stepper motor, 12 teeth on minute hand
 const double ClockGearRatio = 14 / 12.0;
 
-void ZeroHands()
+void HomeHands()
 {
   //find our zero point
   stepper.setSpeed(MaxSpeed);
@@ -82,11 +82,25 @@ void ZeroHands()
   {
     Serial.println("    " + String(minutePositions[i]));
   }
+
+  //now we move the hands to 12:00 and call
+  //stepper.setCurrentPosition(0);
+  //to make the math a little easier
+
 }
 
-void SetTime()
+void MoveToCurrentTime()
 {
-  ZeroHands();
+  //need actual time/current time and mapping to/from current time and target stepper position
+
+  //reset the position to 0
+  //if (time == 12:00:00)
+  //  stepper.setCurrentPosition(0);
+
+  //set the target position...
+  //stepper.move(relativePos); //move to a relative position
+  //stepper.moveTo(absolutePos); //move to an absolute position (probably preferred)
+
 }
 
 void setup() {
@@ -105,12 +119,21 @@ void setup() {
 	// https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 	myTZ.setLocation("America/New_York");
 
-  SetTime();
+  HomeHands();
+  MoveToCurrentTime();
 }
+
+
 
 void loop()
 {
   // put your main code here, to run repeatedly:
   events(); //for ezTime
-  stepper.run(); //for AccelStepper
+
+  MoveToCurrentTime();
+
+  while (stepper.run())
+  {}
+
+  yield();
 }
