@@ -16,6 +16,7 @@ const int MaxRPM = 15;
 const float MaxSpeed = StepsPerRevolution * MaxRPM / 60.0f;
 
 AccelStepper stepper(AccelStepper::FULL4WIRE, 32, 26, 25, 27);
+Timezone myTZ;
 
 //14 teeth on stepper motor, 12 teeth on minute hand
 const double ClockGearRatio = 14 / 12.0;
@@ -83,15 +84,29 @@ void HomeHands()
     Serial.println("    " + String(minutePositions[i]));
   }
 
-  //now we move the hands to 12:00 and call
-  //stepper.setCurrentPosition(0);
-  //to make the math a little easier
+  //TODO: move hands to 12:00
+  //do some math!!
+  
 
+  //to make the math a little easier...
+  stepper.setCurrentPosition(0);
 }
 
 void MoveToCurrentTime()
 {
   //need actual time/current time and mapping to/from current time and target stepper position
+  uint8_t hour = myTZ.hourFormat12();
+  uint8_t minute = myTZ.minute();
+  uint8_t second = myTZ.second();
+  //uint16_t ms = myTZ.ms(); //maybe?
+
+
+
+  long seconds = hour * 60 * 60 + minute * 60 + second;
+  long pos = seconds * ClockGearRatio;
+
+  stepper.moveTo(pos);
+
 
   //reset the position to 0
   //if (time == 12:00:00)
@@ -103,17 +118,23 @@ void MoveToCurrentTime()
 
 }
 
-void setup() {
-  // put your setup code here, to run once:
+void setup()
+{
+  Serial.begin(115200);
+
   pinMode(HOUR_SENSOR_PIN, INPUT_PULLUP);
   pinMode(MINUTE_SENSOR_PIN, INPUT_PULLUP);
+  pinMode(BUILTIN_LED, OUTPUT);
+  digitalWrite(BUILTIN_LED, HIGH);
 
-  //TODO: start wifi
+  //start wifi
+  WiFi.mode(WIFI_STA);
   WiFi.begin("cjweiland", "areallygoodkey");
+  while (WiFi.status() != WL_CONNECTED)
+    delay(100);
 
   waitForSync();
 
-  Timezone myTZ;
 
 	// Provide official timezone names
 	// https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
@@ -122,8 +143,6 @@ void setup() {
   HomeHands();
   MoveToCurrentTime();
 }
-
-
 
 void loop()
 {
@@ -136,4 +155,5 @@ void loop()
   {}
 
   yield();
+  delay(100);
 }
