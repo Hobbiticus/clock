@@ -3,93 +3,85 @@
 #include <ezTime.h>
 #include <WiFi.h>
 
-#define HOUR_SENSOR_PIN 2
-#define MINUTE_SENSOR_PIN 4
+#define HOUR_SENSOR_PIN 21
+#define MINUTE_SENSOR_PIN 18
+#define STEPPER_ENABLE_PIN 13
 
-const unsigned int StepsPerRevOfMainRotor = 64;
+#define USE_FET
+
+const unsigned int StepsPerRevOfMainRotor = 32;
 //sources differ for the gear ratio
 const double GearRatio = 64; //amazon says this
 //const double GearRatio = 63.68395; //this *may* be more accurate?
 const double StepsPerRevolution = StepsPerRevOfMainRotor * GearRatio;
 
-const int MaxRPM = 15;
+const int MaxRPM = 16; //absolute max is probably about 17?
 const float MaxSpeed = StepsPerRevolution * MaxRPM / 60.0f;
 
-AccelStepper stepper(AccelStepper::FULL4WIRE, 32, 26, 25, 27);
+AccelStepper stepper(AccelStepper::FULL4WIRE, 27, 25, 26, 33);
 Timezone myTZ;
 
 //14 teeth on stepper motor, 12 teeth on minute hand
-const double ClockGearRatio = 14 / 12.0;
+const double ClockGearRatio = 12 / 14.0;
+
+const double StepsPerHour = ClockGearRatio * StepsPerRevolution;
+const double StepsPerMinute = StepsPerHour / 60;
+const double StepsPerSecond = StepsPerMinute / 60;
+const double StepsPer12Hours = StepsPerHour * 12;
 
 void HomeHands()
 {
-  //find our zero point
+  Serial.println("Homing hands...");
   stepper.setSpeed(MaxSpeed);
 
-  long hourPosition = -1;
-  long minutePosition = -1;
-  int numMinutePositions = 0;
-  long minutePositions[12];
-  bool wasMinuteTriggered = false;
-  //go round and round until we hit both sensors
-  while (hourPosition < 0 && minutePosition < 0)
+  //if we see both sensors are set already, move back a bit
+  if (digitalRead(MINUTE_SENSOR_PIN) == LOW && digitalRead(HOUR_SENSOR_PIN) == LOW)
   {
+    stepper.move(-10 * StepsPerMinute);
+    while (stepper.run())
+    {}
+  }
+
+  //find our zero point
+  //go round and round until we hit both sensors
+#ifdef USE_FET
+  digitalWrite(STEPPER_ENABLE_PIN, LOW);
+#else
+  stepper.enableOutputs();
+#endif
+  while (true)
+  {
+    digitalWrite(BUILTIN_LED, digitalRead(MINUTE_SENSOR_PIN) == LOW || digitalRead(HOUR_SENSOR_PIN) == LOW ? HIGH : LOW);
     //round and round she goes, where she stops...well that's what we want to find out
     if (!stepper.runSpeed())
     {
       yield();
-      continue;
     }
 
-    if (hourPosition < 0 && digitalRead(HOUR_SENSOR_PIN) == LOW)
-    {
-      hourPosition = stepper.currentPosition();
-      Serial.println("Hit hour sensor = " + String(hourPosition));
-    }
-    if (minutePosition < 0 && digitalRead(MINUTE_SENSOR_PIN) == LOW)
-    {
-      minutePosition = stepper.currentPosition();
-      Serial.println("Hit minute sensor = " + String(minutePosition));
-    }
-    if (digitalRead(MINUTE_SENSOR_PIN) == LOW)
-    {
-      if (!wasMinuteTriggered)
-      {
-        wasMinuteTriggered = true;
-        if (numMinutePositions < 12)
-        {
-          Serial.println("Tracked minute sensor = " + String(stepper.currentPosition()));
-          minutePositions[numMinutePositions] = stepper.currentPosition();
-          numMinutePositions++;
-        }
-        //wait a bit to indicate a hit
-        delay(1000);
-      }
-    }
-    else
-      wasMinuteTriggered = false;
-    //indicate when we hit sensors
-    if (digitalRead(MINUTE_SENSOR_PIN) == LOW || digitalRead(HOUR_SENSOR_PIN) == LOW)
-      digitalWrite(BUILTIN_LED, LOW);
-    else
-      digitalWrite(BUILTIN_LED, HIGH);
-  }
-  Serial.println("Found sensors:");
-  Serial.println("  Hour = " + String(hourPosition));
-  Serial.println("  Minute = " + String(minutePosition));
-
-  Serial.println("  or...");
-  for (int i = 0; i < numMinutePositions; i++)
-  {
-    Serial.println("    " + String(minutePositions[i]));
+    if (digitalRead(HOUR_SENSOR_PIN) == LOW && digitalRead(MINUTE_SENSOR_PIN) == LOW)
+      break;
   }
 
-  //TODO: move hands to 12:00
-  //do some math!!
-  
+  //move just a little farther to (hopefully) exactly 12:00
+  //stepper.move(StepsPerMinute * 0.5);
+  //while (stepper.run())
+  //{}
+  delay(100);
+#ifdef USE_FET
+  digitalWrite(STEPPER_ENABLE_PIN, HIGH);
+#else
+  stepper.disableOutputs();
+#endif
 
   //to make the math a little easier...
-  stepper.setCurrentPosition(0);
+  if (myTZ.hourFormat12() > 6)
+    //so we go backwards to the correct time
+    stepper.setCurrentPosition(StepsPer12Hours);
+  else
+    //so we got forwards to the correct time
+    stepper.setCurrentPosition(0);
+  Serial.println("Hands are homed!");
+  delay(1000);
 }
 
 void MoveToCurrentTime()
@@ -99,33 +91,73 @@ void MoveToCurrentTime()
   uint8_t minute = myTZ.minute();
   uint8_t second = myTZ.second();
   //uint16_t ms = myTZ.ms(); //maybe?
-
-
+  Serial.println("Time is now: " + String(hour) + ":" + String(minute) + ":" + String(second));
 
   long seconds = hour * 60 * 60 + minute * 60 + second;
-  long pos = seconds * ClockGearRatio;
+  long pos = seconds * StepsPerSecond;
+  //don't do anything if there is no place to go
+  if (pos == stepper.currentPosition())
+    return;
+
+  if (pos < StepsPerHour && stepper.currentPosition() > 11 * StepsPerHour)
+  {
+    //crossed 12:00 - need to fix the math so we don't rewind
+    stepper.setCurrentPosition(stepper.currentPosition() - StepsPer12Hours);
+  }
+
+#ifdef USE_FET
+  digitalWrite(STEPPER_ENABLE_PIN, LOW);
+#else
+  stepper.enableOutputs();
+  stepper.moveTo(stepper.currentPosition());
+  stepper.run();
+  //delay(100);
+#endif
+  delay(100);
+  if (pos < stepper.currentPosition())
+  {
+    //move back a little further
+    stepper.moveTo(pos - StepsPerMinute * 5);
+    while (stepper.run())
+    {
+      digitalWrite(BUILTIN_LED, digitalRead(MINUTE_SENSOR_PIN) == LOW || digitalRead(HOUR_SENSOR_PIN) == LOW ? HIGH : LOW);
+    }
+  }
+  Serial.println("Seconds passed the hour = " + String(seconds));
+  Serial.println("Moving to step position " + String(pos));
 
   stepper.moveTo(pos);
+  while (stepper.run())
+  {
+    digitalWrite(BUILTIN_LED, digitalRead(MINUTE_SENSOR_PIN) == LOW || digitalRead(HOUR_SENSOR_PIN) == LOW ? HIGH : LOW);
+  }
 
-
-  //reset the position to 0
-  //if (time == 12:00:00)
-  //  stepper.setCurrentPosition(0);
-
-  //set the target position...
-  //stepper.move(relativePos); //move to a relative position
-  //stepper.moveTo(absolutePos); //move to an absolute position (probably preferred)
-
+  digitalWrite(BUILTIN_LED, digitalRead(MINUTE_SENSOR_PIN) == LOW || digitalRead(HOUR_SENSOR_PIN) == LOW ? HIGH : LOW);
+  delay(100);
+#ifdef USE_FET
+  digitalWrite(STEPPER_ENABLE_PIN, HIGH);
+#else
+  delay(100);
+  stepper.disableOutputs();
+#endif
 }
 
 void setup()
 {
   Serial.begin(115200);
+  Serial.println("Setting up...");
 
   pinMode(HOUR_SENSOR_PIN, INPUT_PULLUP);
   pinMode(MINUTE_SENSOR_PIN, INPUT_PULLUP);
-  pinMode(BUILTIN_LED, OUTPUT);
-  digitalWrite(BUILTIN_LED, HIGH);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+  stepper.setMaxSpeed(MaxSpeed);
+  stepper.setAcceleration(200);
+#ifdef USE_FET
+  pinMode(STEPPER_ENABLE_PIN, OUTPUT);
+#else
+  //stepper.setEnablePin(STEPPER_ENABLE_PIN);
+#endif
 
   //start wifi
   WiFi.mode(WIFI_STA);
@@ -134,7 +166,6 @@ void setup()
     delay(100);
 
   waitForSync();
-
 
 	// Provide official timezone names
 	// https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
@@ -146,14 +177,9 @@ void setup()
 
 void loop()
 {
-  // put your main code here, to run repeatedly:
   events(); //for ezTime
 
   MoveToCurrentTime();
 
-  while (stepper.run())
-  {}
-
-  yield();
   delay(100);
 }
