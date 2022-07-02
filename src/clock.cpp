@@ -7,7 +7,7 @@
 #define MINUTE_SENSOR_PIN 18
 #define STEPPER_ENABLE_PIN 13
 
-#define USE_FET
+//#define USE_FET
 
 const unsigned int StepsPerRevOfMainRotor = 32;
 //sources differ for the gear ratio
