@@ -161,7 +161,8 @@ void setup()
 
   //start wifi
   WiFi.mode(WIFI_STA);
-  WiFi.begin("cjweiland", "areallygoodkey");
+#include "creds.h"
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED)
     delay(100);
 
