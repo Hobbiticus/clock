@@ -93,7 +93,7 @@ void MoveToCurrentTime()
   //uint16_t ms = myTZ.ms(); //maybe?
   Serial.println("Time is now: " + String(hour) + ":" + String(minute) + ":" + String(second));
 
-  long seconds = hour * 60 * 60 + minute * 60 + second;
+  long seconds = (hour - 1) * 60 * 60 + minute * 60 + second;
   long pos = seconds * StepsPerSecond;
   //don't do anything if there is no place to go
   if (pos == stepper.currentPosition())
